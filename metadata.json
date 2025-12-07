@@ -1,0 +1,5 @@
+{
+  "name": "Z-AutoReg Bot",
+  "description": "Automated account generator and registration tool replicating specific API logic with MD5 hashing and data export capabilities.",
+  "requestFramePermissions": []
+}
