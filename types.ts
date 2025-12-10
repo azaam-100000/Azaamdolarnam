@@ -1,25 +1,16 @@
+
 export interface GeneratedAccount {
   id: string;
   email: string;
-  passwordPlain: string;
-  passwordMd5: string;
-  status: 'PENDING' | 'SUCCESS' | 'ERROR';
-  createdAt: string;
-  errorMessage?: string;
+  password_plain: string;
+  password_md5: string;
+  created_at: string;
+  user_id?: string;
 }
 
-export interface ApiConfig {
-  count: number;
-  delayMs: number;
-}
-
-export interface RegistrationPayload {
-  account: string;
-  pwd: string;
-  user_type: number;
-  user_email: string;
-  code: string;
-  captcha: string;
-  telegram: string;
-  whatsapp: string;
+export interface GameState {
+  user_id: string;
+  current_index: number;
+  current_level: number;
+  updated_at?: string;
 }
