@@ -14,8 +14,28 @@ import {
   Zap, 
   Trophy,
   RotateCcw,
-  Check
+  Check,
+  Undo2,
+  MessageCircle
 } from 'lucide-react';
+
+const MOTIVATIONAL_QUOTES = [
+  "ثابر إلى طريق النجاح",
+  "أنت تصنع مستقبلك الآن",
+  "لا تتوقف، القمة بانتظارك",
+  "كل ضغطة تقربك من الهدف",
+  "استمر، النجاح يليق بك",
+  "العظيم لا يولد، بل يصنع",
+  "خطوة بخطوة نحو القمة",
+  "ركز، أنت الأفضل",
+  "لا تلتفت للخلف، انطلق",
+  "الإصرار هو سر النجاح",
+  "أبدعت! استمر بهذا الحماس",
+  "المستحيل مجرد كلمة، ليس واقعاً",
+  "أنت أقوى مما تعتقد",
+  "اصنع فرصتك بيدك",
+  "كل انجاز عظيم يبدأ بخطوة"
+];
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -111,6 +131,8 @@ const MachineApp: React.FC<{ session: Session }> = ({ session }) => {
   const [targetCount, setTargetCount] = useState(10);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [backup, setBackup] = useState<{accounts: GeneratedAccount[], state: GameState} | null>(null);
+  const [azzamMessage, setAzzamMessage] = useState<string>("");
 
   // Load Data on Mount
   useEffect(() => {
@@ -207,6 +229,10 @@ const MachineApp: React.FC<{ session: Session }> = ({ session }) => {
       nextLevel += 1;
     }
 
+    // Set Random Message
+    const randomQuote = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
+    setAzzamMessage(randomQuote);
+
     // Optimistic Update (UI updates instantly)
     setGameState({ ...gameState, current_index: nextIndex, current_level: nextLevel });
 
@@ -236,13 +262,54 @@ const MachineApp: React.FC<{ session: Session }> = ({ session }) => {
 
   const handleReset = async () => {
     if(confirm("هل أنت متأكد؟ سيتم حذف جميع الحسابات والعودة للمستوى 1.")) {
+      // 1. Create Backup
+      const backupData = { accounts: [...accounts], state: { ...gameState } };
+      setBackup(backupData);
+
+      // 2. Delete from DB
       const { error } = await supabase.from('generated_accounts').delete().eq('user_id', session.user.id);
       if (error) {
         alert("فشل الحذف: " + error.message);
+        setBackup(null);
         return;
       }
+
+      // 3. Reset State in DB
       await updateGameState(0, 1);
+
+      // 4. Update UI
       setAccounts([]);
+      setAzzamMessage(""); // Reset message
+      
+      // 5. Clear backup after 8 seconds
+      setTimeout(() => {
+        setBackup(null);
+      }, 8000);
+    }
+  };
+
+  const handleUndo = async () => {
+    if (!backup) return;
+
+    setIsLoading(true);
+    try {
+      // 1. Restore Accounts to DB
+      const { error: accError } = await supabase.from('generated_accounts').insert(backup.accounts);
+      if (accError) throw accError;
+
+      // 2. Restore State to DB
+      const { error: stateError } = await supabase.from('game_state').upsert(backup.state);
+      if (stateError) throw stateError;
+
+      // 3. Update UI
+      setAccounts(backup.accounts);
+      setGameState(backup.state);
+      setBackup(null);
+      alert("تم استرجاع البيانات بنجاح");
+    } catch (e: any) {
+      alert("فشل الاسترجاع: " + e.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -250,142 +317,173 @@ const MachineApp: React.FC<{ session: Session }> = ({ session }) => {
 
   if (isLoading) return <div className="flex h-screen items-center justify-center text-white flex-col gap-4"><Loader className="animate-spin text-emerald-500" size={48} /><p>جاري تحميل الماكينة...</p></div>;
 
-  // View 1: Generator (If no accounts)
-  if (accounts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center space-y-6">
-        <div className="bg-gray-800 p-8 rounded-2xl border border-gray-700 shadow-2xl max-w-md w-full">
-          <Zap size={48} className="text-yellow-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">الماكينة فارغة</h2>
-          <p className="text-gray-400 mb-6">قم بتوليد الحسابات للبدء في اللعبة</p>
-          
-          <div className="flex gap-2 mb-4 justify-center">
-            <input 
-              type="number" 
-              value={targetCount} 
-              onChange={e => setTargetCount(Number(e.target.value))}
-              className="bg-gray-900 border border-gray-600 rounded px-4 py-2 text-white w-24 text-center font-bold text-lg"
-            />
-            <span className="self-center text-gray-400">حساب</span>
-          </div>
-
-          <button 
-            onClick={handleGenerate} 
-            disabled={isGenerating}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-          >
-            {isGenerating ? <Loader className="animate-spin" /> : <><Play fill="currentColor" /> بدء التوليد</>}
-          </button>
-          
-          <button onClick={() => supabase.auth.signOut()} className="mt-6 text-red-400 text-sm hover:underline flex items-center justify-center gap-1">
-            <LogOut size={14} /> تسجيل خروج
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // View 2: The Machine (Game)
-  const currentAccount = accounts[gameState.current_index] || accounts[0];
-  const isMaxLevel = gameState.current_level > 10;
-
   return (
     <div className="flex flex-col items-center min-h-screen bg-gray-900 p-4 relative overflow-hidden">
-      {/* Top Bar */}
-      <div className="w-full max-w-md flex justify-between items-center mb-6 p-2 z-10">
-        <div className="flex items-center gap-2 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">
-           <Trophy className="text-yellow-500" size={16} />
-           <span className="font-bold text-yellow-500">مستوى {gameState.current_level}</span>
-           <span className="text-gray-500 text-xs">/ 10</span>
+      
+      {/* Undo Toast */}
+      {backup && (
+        <div className="fixed bottom-6 z-50 animate-bounce">
+          <div className="bg-gray-800 text-white px-6 py-4 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] border border-gray-600 flex items-center gap-4">
+            <div className="flex flex-col">
+              <span className="font-bold text-red-400">تم حذف البيانات</span>
+              <span className="text-xs text-gray-400">لديك فرصة للتراجع الآن</span>
+            </div>
+            <button 
+              onClick={handleUndo}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-lg"
+            >
+              <Undo2 size={18} /> تراجع
+            </button>
+          </div>
         </div>
-        <button onClick={() => supabase.auth.signOut()} className="text-gray-500 hover:text-white">
-          <LogOut size={20} />
-        </button>
-      </div>
+      )}
 
-      {isMaxLevel ? (
-        <div className="text-center mt-20 p-8 bg-gray-800 rounded-2xl border-2 border-yellow-500 animate-pulse z-10">
-           <Trophy size={64} className="text-yellow-400 mx-auto mb-4" />
-           <h1 className="text-3xl font-bold text-white mb-2">🎉 تهانينا! 🎉</h1>
-           <p className="text-yellow-200 mb-6">لقد أنهيت التحدي ووصلت للمستوى 10!</p>
-           <button onClick={handleReset} className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-bold">
-             إعادة ضبط الماكينة
-           </button>
+      {/* View 1: Generator (If no accounts) */}
+      {accounts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center flex-1 w-full max-w-md">
+          <div className="bg-gray-800 p-8 rounded-2xl border border-gray-700 shadow-2xl w-full">
+            <Zap size={48} className="text-yellow-400 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2 text-center">الماكينة فارغة</h2>
+            <p className="text-gray-400 mb-6 text-center">قم بتوليد الحسابات للبدء في اللعبة</p>
+            
+            <div className="flex gap-2 mb-4 justify-center">
+              <input 
+                type="number" 
+                value={targetCount} 
+                onChange={e => setTargetCount(Number(e.target.value))}
+                className="bg-gray-900 border border-gray-600 rounded px-4 py-2 text-white w-24 text-center font-bold text-lg"
+              />
+              <span className="self-center text-gray-400">حساب</span>
+            </div>
+
+            <button 
+              onClick={handleGenerate} 
+              disabled={isGenerating}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              {isGenerating ? <Loader className="animate-spin" /> : <><Play fill="currentColor" /> بدء التوليد</>}
+            </button>
+            
+            <button onClick={() => supabase.auth.signOut()} className="mt-6 text-red-400 text-sm hover:underline flex items-center justify-center gap-1 mx-auto">
+              <LogOut size={14} /> تسجيل خروج
+            </button>
+          </div>
         </div>
       ) : (
+        // View 2: The Machine (Game)
         <>
-          {/* Account Card */}
-          <div className="w-full max-w-md bg-gray-800 rounded-2xl p-6 border border-gray-700 shadow-2xl mb-8 relative z-10">
-            <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-gray-900 px-4 py-1 rounded-full border border-gray-700 text-xs text-gray-400">
-               حساب رقم {gameState.current_index + 1} من {accounts.length}
+          {/* Top Bar */}
+          <div className="w-full max-w-md flex justify-between items-center mb-6 p-2 z-10">
+            <div className="flex items-center gap-2 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">
+               <Trophy className="text-yellow-500" size={16} />
+               <span className="font-bold text-yellow-500">مستوى {gameState.current_level}</span>
+               <span className="text-gray-500 text-xs">/ 10</span>
             </div>
-
-            {/* Email Field */}
-            <div className="mb-4">
-              <label className="text-xs text-emerald-400 mb-1 block flex items-center gap-1">
-                <Mail size={12} /> البريد الإلكتروني
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-gray-900 p-3 rounded-lg border border-gray-700 font-mono text-sm truncate text-left text-white" dir="ltr">
-                  {currentAccount?.email}
-                </div>
-                <button 
-                  onClick={() => copyToClipboard(currentAccount?.email, 'email')}
-                  className={`p-3 rounded-lg transition-colors ${copiedField === 'email' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                >
-                  {copiedField === 'email' ? <Check size={20} /> : <Copy size={20} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Password Field */}
-            <div>
-              <label className="text-xs text-blue-400 mb-1 block flex items-center gap-1">
-                <Lock size={12} /> كلمة المرور
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-gray-900 p-3 rounded-lg border border-gray-700 font-mono text-sm truncate text-left text-white" dir="ltr">
-                  {currentAccount?.password_plain}
-                </div>
-                <button 
-                  onClick={() => copyToClipboard(currentAccount?.password_plain, 'pass')}
-                  className={`p-3 rounded-lg transition-colors ${copiedField === 'pass' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                >
-                  {copiedField === 'pass' ? <Check size={20} /> : <Copy size={20} />}
-                </button>
-              </div>
-            </div>
+            <button onClick={() => supabase.auth.signOut()} className="text-gray-500 hover:text-white">
+              <LogOut size={20} />
+            </button>
           </div>
 
-          {/* The Big Button */}
-          <div className="relative z-0">
-             {/* Glow Effect */}
-             <div className="absolute inset-0 bg-emerald-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
-             
-             <button 
-                onClick={handleNext}
-                className="relative w-64 h-64 rounded-full bg-gradient-to-b from-gray-700 to-gray-900 border-8 border-gray-800 shadow-[0_10px_50px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center group active:scale-95 transition-all duration-150"
-             >
-                {/* Inner Ring */}
-                <div className="absolute inset-2 rounded-full border-2 border-gray-600/50"></div>
-                
-                {/* Content */}
-                <span className="text-6xl font-black text-white drop-shadow-lg font-mono">
-                  {gameState.current_index + 1}
-                </span>
-                <span className="text-emerald-500 text-sm mt-2 font-bold uppercase tracking-widest group-hover:text-emerald-400">
-                  اضغط للتالي
-                </span>
-             </button>
-          </div>
+          {gameState.current_level > 10 ? (
+            <div className="text-center mt-20 p-8 bg-gray-800 rounded-2xl border-2 border-yellow-500 animate-pulse z-10">
+               <Trophy size={64} className="text-yellow-400 mx-auto mb-4" />
+               <h1 className="text-3xl font-bold text-white mb-2">🎉 تهانينا! 🎉</h1>
+               <p className="text-yellow-200 mb-6">لقد أنهيت التحدي ووصلت للمستوى 10!</p>
+               <button onClick={handleReset} className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-bold">
+                 إعادة ضبط الماكينة
+               </button>
+            </div>
+          ) : (
+            <>
+              {/* Account Card */}
+              <div className="w-full max-w-md bg-gray-800 rounded-2xl p-6 border border-gray-700 shadow-2xl mb-4 relative z-10">
+                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-gray-900 px-4 py-1 rounded-full border border-gray-700 text-xs text-gray-400">
+                   حساب رقم {gameState.current_index + 1} من {accounts.length}
+                </div>
 
-          {/* Reset Button (Small) */}
-          <button 
-            onClick={handleReset}
-            className="mt-12 text-gray-600 hover:text-red-400 flex items-center gap-1 text-xs transition-colors"
-          >
-            <RotateCcw size={12} /> تصفير الماكينة
-          </button>
+                {/* Email Field */}
+                <div className="mb-4">
+                  <label className="text-xs text-emerald-400 mb-1 block flex items-center gap-1">
+                    <Mail size={12} /> البريد الإلكتروني
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 bg-gray-900 p-3 rounded-lg border border-gray-700 font-mono text-sm truncate text-left text-white" dir="ltr">
+                      {accounts[gameState.current_index]?.email}
+                    </div>
+                    <button 
+                      onClick={() => copyToClipboard(accounts[gameState.current_index]?.email, 'email')}
+                      className={`p-3 rounded-lg transition-colors ${copiedField === 'email' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                    >
+                      {copiedField === 'email' ? <Check size={20} /> : <Copy size={20} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <label className="text-xs text-blue-400 mb-1 block flex items-center gap-1">
+                    <Lock size={12} /> كلمة المرور
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 bg-gray-900 p-3 rounded-lg border border-gray-700 font-mono text-sm truncate text-left text-white" dir="ltr">
+                      {accounts[gameState.current_index]?.password_plain}
+                    </div>
+                    <button 
+                      onClick={() => copyToClipboard(accounts[gameState.current_index]?.password_plain, 'pass')}
+                      className={`p-3 rounded-lg transition-colors ${copiedField === 'pass' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                    >
+                      {copiedField === 'pass' ? <Check size={20} /> : <Copy size={20} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Azzam's Message Area */}
+              <div className="h-16 flex items-center justify-center mb-4 w-full relative z-10">
+                {azzamMessage ? (
+                  <div key={gameState.current_index} className="bg-gray-800/80 backdrop-blur-sm border border-emerald-500/30 px-6 py-3 rounded-full animate-[fadeIn_0.5s_ease-out]">
+                     <p className="text-sm md:text-base flex items-center gap-2">
+                       <MessageCircle size={16} className="text-emerald-500" />
+                       <span className="text-emerald-400 font-bold whitespace-nowrap">عزام يقول لك:</span>
+                       <span className="text-white font-medium">{azzamMessage}</span>
+                     </p>
+                  </div>
+                ) : (
+                  <div className="text-gray-600 text-sm">اضغط على الزر للبدء...</div>
+                )}
+              </div>
+
+              {/* The Big Button */}
+              <div className="relative z-0">
+                 {/* Glow Effect */}
+                 <div className="absolute inset-0 bg-emerald-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
+                 
+                 <button 
+                    onClick={handleNext}
+                    className="relative w-64 h-64 rounded-full bg-gradient-to-b from-gray-700 to-gray-900 border-8 border-gray-800 shadow-[0_10px_50px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center group active:scale-95 transition-all duration-150"
+                 >
+                    {/* Inner Ring */}
+                    <div className="absolute inset-2 rounded-full border-2 border-gray-600/50"></div>
+                    
+                    {/* Content */}
+                    <span className="text-6xl font-black text-white drop-shadow-lg font-mono">
+                      {gameState.current_index + 1}
+                    </span>
+                    <span className="text-emerald-500 text-sm mt-2 font-bold uppercase tracking-widest group-hover:text-emerald-400">
+                      اضغط للتالي
+                    </span>
+                 </button>
+              </div>
+
+              {/* Reset Button (Small) */}
+              <button 
+                onClick={handleReset}
+                className="mt-12 text-gray-600 hover:text-red-400 flex items-center gap-1 text-xs transition-colors"
+              >
+                <RotateCcw size={12} /> تصفير الماكينة
+              </button>
+            </>
+          )}
         </>
       )}
     </div>
